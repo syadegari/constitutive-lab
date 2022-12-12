@@ -1,0 +1,27 @@
+!    -*- f90 -*-
+! Note: the context of this file is case sensitive.
+
+python module pyUMATLink ! in 
+    interface  ! in :pyUMATLink
+        subroutine pysdvini(statev,nstatv) ! in :pyUMATLink:fortPyBind.f90
+            double precision dimension(nstatv) :: statev
+            integer, optional,check(shape(statev, 0) == nstatv),depend(statev) :: nstatv=shape(statev, 0)
+        end subroutine pysdvini
+        subroutine fortumat(f1,f2,t1,t2,initemp,sigma,c,xi,angles,nstatv) ! in :pyUMATLink:fortPyBind.f90
+            double precision dimension(3,3) :: f1
+            double precision dimension(3,3) :: f2
+            double precision :: t1
+            double precision :: t2
+            double precision :: initemp
+            double precision dimension(6) :: sigma
+            double precision dimension(6,6) :: c
+            double precision dimension(nstatv) :: xi
+            double precision dimension(3) :: angles
+            integer, optional,check(shape(xi, 0) == nstatv),depend(xi) :: nstatv=shape(xi, 0)
+        end subroutine fortumat
+    end interface 
+end python module pyUMATLink
+
+! This file was auto-generated with f2py (version:1.23.4).
+! See:
+! https://web.archive.org/web/20140822061353/http://cens.ioc.ee/projects/f2py2e
