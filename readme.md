@@ -1,4 +1,4 @@
-# Crystal plasticity in PyTorch
+# Introduction and scope
 
 Computational experiments in constitutive modelling and material response, using
 PyTorch to capture the response of a crystal-plasticity material with
