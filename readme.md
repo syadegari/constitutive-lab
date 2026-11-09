@@ -1,87 +1,118 @@
-# Redesign the umat in python
+# Crystal plasticity in PyTorch
 
-## Why are we doing this?
+Computational experiments in constitutive modelling and material response, using
+PyTorch to capture the response of a crystal-plasticity material with
+autoregressive models. At each loading increment, the model updates the material
+state and predicts the response; its updated state becomes the input to the next
+increment. The aim is reliable stress and internal-state histories across unseen
+loading paths and crystal orientations.
 
-### How UMAT works
+The Fortran UMAT supplies the constitutive equations and reference trajectories.
+Its local return-mapping problem couples 24 slip increments and 24 slip
+resistances. The original work brought those equations into PyTorch to explore
+automatic differentiation and Newton updates. That physics foundation supports
+the autoregressive models, their training losses, and possible residual-based
+corrections.
 
-What happens in UMAT is simple: at its heart, the return-mapping-algorithm, solves a nonlinear system using the NR procedure. There are 48 unknowns/equations in this system. 24 are the amount of (plastic) slip and 24 are the plastic slip resistances. Because of the nonlinear nature of this system of equations, we solve this system by perturbing on unnkown at a time and form a jacobian, which we will use to update the values of the unknowns while iterating.
+The current implementation provides:
 
-### What we want to achieve
+- tensor operations for crystal rotations, hardening, plastic deformation, physical residuals, and Cauchy stress;
+- a network predicting slip and slip resistance, with data loss, physics loss, and constraint penalties;
+- autoregressive inference with a selectable switch from Fortran to learned updates;
+- Fortran sources and Python bindings in `umat_ggcm/`, plus formula and batching tests.
 
-- If we can identify the forward pass in the UMAT (the one that we use as a starting point for perturbation), then we can implement that in pytorch. Then we can investigate if this forward pass will give us a gradient. If yes, we use this gradient to multiply with the residual vector
+The physics implementation and training workflow are a starting point. Reliable
+rollout accuracy and generalization remain to be established.
 
-### can pytorch compute the inverse of a jacobian?
+## Project status and TODO
 
-If the forward pass is successful, we get the jacobian, but to complete the NR-procedure, we will need to multiply the inverse of this jacobian with the residual vector. Can we do this inversion?
+Checked items describe existing capabilities. Unchecked items describe the next
+implementation and research tasks. See [the development plan](docs/development-plan.md)
+for their rationale, numerical details, and acceptance checks.
 
-## code coverage
+### Material model and reference checks
+
+- [x] Implement crystal rotations, hardening, plastic deformation, and Cauchy stress in PyTorch.
+- [x] Add inverse slip-rate residuals, constraint penalties, and formula/batching tests.
+- [x] Include the Fortran material model and Python bindings.
+- [ ] Correct non-Schmid activation and enforce previous-step slip-resistance bounds below saturation.
+- [ ] Standardize single-sample physics helpers and verify their `vmap` batching.
+- [ ] Verify Fortran/Python residual and stress agreement across orientations and loading cases.
+- [ ] Audit material parameters and initial state, including beta, and qualify the reference solver.
+- [ ] Record return-mapping convergence, active-set checks, substeps, and timing.
+
+### Data and training
+
+- [x] Implement supervised/physics training, configurable loss logging, and model saving.
+- [ ] Add reproducible trajectory datasets with independent path/orientation partitions.
+- [ ] Establish a scaled, uniform-sampling baseline with joint slip/resistance updates and complete state inputs.
+- [ ] Implement normalized weighted losses and a combined residual vector; diagnose nonfinite values.
+- [ ] Add prioritized replay and trajectory refill; verify sampling, priorities, and beta annealing.
+- [ ] Add cosine learning-rate scheduling and resumable training checkpoints.
+- [ ] Extend diagnostics with loss components, priorities, sampled weights, replay beta, and validation plots.
+
+### Rollout validation and generalization
+
+- [x] Implement autoregression with an `alpha` switch between Fortran and learned updates.
+- [ ] Evaluate full stress and internal-state histories, with explicit validation frequency and held-out tests.
+- [ ] Pass one-trajectory and small-set rollout diagnostics before expanding model capacity.
+- [ ] Compare absolute outputs, increments, trial-residual inputs, and an elastic trial branch.
+- [ ] Compare one-step and multistep training, including scaled state/stress losses with full state feedback.
+- [ ] Demonstrate generalization to unseen paths, unseen orientations, and both together.
+
+### Further development
+
+- [ ] Compare uniform and prioritized sampling under matched training budgets.
+- [ ] Investigate residual-guided correction with acceptance checks and a reference fallback.
+- [ ] Study constraint formulations and loss balancing, including barriers, warmup, gradient clipping, and L2 regularization.
+- [ ] Compare original/inverse slip-rate residuals and residuals between converged states.
+- [ ] Verify automatic-differentiation residual Jacobians and evaluate Newton corrections to predicted updates.
+- [ ] Extend loading histories to unloading, direction changes, and variable time increments.
+- [ ] Assess model capacity, float32 accuracy, and device portability after reproducing the baseline.
+- [ ] Verify derivatives of the complete update and consistent tangents before FE integration.
+
+## Run
+
+Run commands from the repository root. The code uses PyTorch, NumPy, einops,
+PyYAML, and TensorBoard; the current packaging does not declare a complete
+dependency environment. Fortran-backed imports also require a compiled
+`umat_ggcm.pyUMATLink` extension and a compatible Fortran/f2py toolchain.
+The existing build recipe is in [umat_ggcm/Makefile](umat_ggcm/Makefile):
+
+```bash
+make -C umat_ggcm compile
+```
+
+Set `sims_path` in [config_file.yaml](config_file.yaml) to an existing simulation
+pickle, choose the loss coefficients and training settings, then run:
+
+```bash
+python driver.py --config-file config_file.yaml
+```
+
+The sample configuration contains a machine-specific data path. A reproducible
+dataset and environment are part of the planned work above.
+
+## Testing
+
+With the dependencies and Fortran extension available:
+
+```bash
+python -m unittest tests.test_umat -v
+```
+
+The [rotation](tests/rotation_matrix_test/README.md) and
+[tensor-contraction](tests/einsum_test/README.md) comparisons have separate
+Fortran build instructions. For coverage:
 
 ```bash
 coverage run -m unittest discover
 coverage report -m
 ```
 
-### TODO
+## Documentation
 
-- [ ] Implement barrier penalty formulation.
-- [ ] Run UMAT-Fortran with the same orientation as the one we use in python-umat and collect statistics
-  - [ ] Compare stress prior to yield from both methods
-    - [ ] Implement stress calculation (Cauchy) in python-umat.
-  - [ ] How many iterations are done in RETURNMAPPINGBCC
-  - [ ] Residual at the end of the return mapping
-  - [ ] How many times we call slip-system-check routine
-  - [ ] Time that takes for a single run of return mapping algorithm
-- [ ] Try both gamma_dot equation in its original form and its inverse form. Add this to config_file as a switch
-- [ ] Replay buffer code.
-- [ ] Autoregression computes both stress and gamma/slipres values. Find proper error indicators for gamma.
-- [ ] Make sure that the computation of stresses from gamma/slip values is consistent and error free.
-- [ ] How to deal with multiple, competing losses.
-  - [ ] Implement a warmup period for where physics is not calculated. There are two approached to this:
-    1. Try to see if relative error make sense. For example, as long as the physics loss is bigger than 10x data_loss don't compute the physics loss
-    2. Simply skip computing the physics loss for eg 100 iterations.
-  - [ ] Clipping the gardient. Clip gradient of each loss separately. But for this we need to accumulate the gradients individually from each loss without the help from the optimizer. See how this should be implemented.
-  - [ ] L2 regularization of weights of the network.
-
-### DONE
-
-- [X] Implement the inverse gamma relation, as mentioned in Denny's thesis.
-
-  Implemented. Currently does not yield good results. It could easily result in nan values and currently is not used. At the moment relying on penalties and data loss to guide the search.
-
-  - [X] Correct `get_r_II` function. In case of $g^{i} < s^{i}$, we should have $\Delta\gamma^{i}$ and not zero.
-
-    This is already taken care of with the inclusion of inverse-gamma relation.
-
-- [X] Factor drive.py into smaller routines.
-- [X] Make the code flexible enough so it runs with optimizers from optim modules, the ad-hoc optimizer, where we zero parameters (that violate constraints) after each iteration.
-
-  This is not considered anymore since we have shifted to PINNs framework.
-
-- [X] Find small numerical "constrained optimization problems" to test various optimization algorithms.
-
-  This is not considered anymore since we have shifted to PINNs framework.
-
-- [X] Write more tests
-
-  All the umat routine are tested and verified (constants, construction and batch computation). Additional tests are written to ensure the computation in fortran and pytorch result in the same values.
-
-- [X] Read about L1-regularization (Could it lead to sparse parameter set?)
-
-  A very wishy-washy explanation, based on what I took from Goodfelllow's book:
-  The main effect of L1-regularization is that the gradient does not scale with the value of parameters, as is the case with L2-regularization. Instead, we get unit gradients for each parameter of the optimization. This, combine with a large penalty coefficient, pushes the parameter to the boundaries (or beyond, which in that case, it is being projected back to the boundary) of the subspace that defines the permissible space for optimization. In short, there is a higher chance, although not guaranteed, that L1-regularization will lead to sparse parameter set than L2-regularization.
-
-- [X] Try LBFGS
-  - How to include constraints in the formulation of LBFGS? This won't be needed at the moment since our focus has shifted to compute the loss using PINNs approach. As such, solely optimizing the physical loss is no longer considered.
-- [X] Add frequency for logging required data into tensorboard. Make sure that frequencies are provided for each logging item.
-- [X] Autoregression code should run from any point in the code (parameter alpha which is between 0 and 1)
-
-  ACTION:
-  Parameter alpha is an argument to the inference funcion now. Tested and works fine.
-
-- [X] Submodule the UMAT/Fortran repo to use it for inference.
-- [X] At inference time, we need to clip gamma and slip resistance that we get from the model
-  - delta gamma should be strictly non-negative
-  - slip resistance should be clipped between min and max slip resistance
-
-  ACTION:
-  Both of these are implemented at both train and inference code.
+The formulation notes are in [docs/main.tex](docs/main.tex) and require LaTeX to
+render. The [development plan](docs/development-plan.md) explains the physical
+checks, training experiments, and rollout criteria needed to develop reliable
+autoregressive material models.
